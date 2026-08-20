@@ -70,6 +70,20 @@ public:
   uint8_t cad_enabled = 0;      // hardware Channel Activity Detection before TX (boolean)
   uint8_t extra_sf[4];
 
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  char corescope_wifi_ssid[33];
+  char corescope_wifi_password[65];
+  char corescope_mqtt3_host[64];
+  uint16_t corescope_mqtt3_port = 443;
+  char corescope_mqtt3_audience[64];
+  char corescope_mqtt4_host[64];
+  uint16_t corescope_mqtt4_port = 443;
+  char corescope_mqtt4_audience[64];
+  char corescope_mqtt_ws_path[64];
+  char corescope_iata[4];
+  char corescope_observer_name[32];
+#endif
+
 private:
   class RadioPrefs : public ConfigSerializer {
     NodePrefs* _parent;
@@ -180,6 +194,19 @@ protected:
     def("repeat", repeat);
     def("room", room);
     def("power", power);
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+    def("cs_wifi_ssid", corescope_wifi_ssid, sizeof(corescope_wifi_ssid));
+    def("cs_wifi_pass", corescope_wifi_password, sizeof(corescope_wifi_password));
+    def("cs_m3_host", corescope_mqtt3_host, sizeof(corescope_mqtt3_host));
+    def("cs_m3_port", corescope_mqtt3_port);
+    def("cs_m3_aud", corescope_mqtt3_audience, sizeof(corescope_mqtt3_audience));
+    def("cs_m4_host", corescope_mqtt4_host, sizeof(corescope_mqtt4_host));
+    def("cs_m4_port", corescope_mqtt4_port);
+    def("cs_m4_aud", corescope_mqtt4_audience, sizeof(corescope_mqtt4_audience));
+    def("cs_ws_path", corescope_mqtt_ws_path, sizeof(corescope_mqtt_ws_path));
+    def("cs_iata", corescope_iata, sizeof(corescope_iata));
+    def("cs_obs_name", corescope_observer_name, sizeof(corescope_observer_name));
+#endif
   }
 
 public:
@@ -189,6 +216,17 @@ public:
     guest_password[0] = 0;
     bridge_secret[0] = 0;
     owner_info[0] = 0;
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+    corescope_wifi_ssid[0] = 0;
+    corescope_wifi_password[0] = 0;
+    corescope_mqtt3_host[0] = 0;
+    corescope_mqtt3_audience[0] = 0;
+    corescope_mqtt4_host[0] = 0;
+    corescope_mqtt4_audience[0] = 0;
+    corescope_mqtt_ws_path[0] = 0;
+    corescope_iata[0] = 0;
+    corescope_observer_name[0] = 0;
+#endif
   }
 };
 

@@ -461,6 +461,9 @@ const char *MyMesh::getLogDateTime() {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  CoreScopeObserver::enqueueRx(snr, rssi, raw, len);
+#endif
 #if MESH_PACKET_LOGGING
   Serial.print(getLogDateTime());
   Serial.print(" RAW: ");
@@ -875,6 +878,28 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   StrHelper::strncpy(_prefs.node_name, ADVERT_NAME, sizeof(_prefs.node_name));
   _prefs.node_lat = ADVERT_LAT;
   _prefs.node_lon = ADVERT_LON;
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  StrHelper::strncpy(_prefs.corescope_wifi_ssid, CORESCOPE_WIFI_SSID,
+                     sizeof(_prefs.corescope_wifi_ssid));
+  StrHelper::strncpy(_prefs.corescope_wifi_password, CORESCOPE_WIFI_PASSWORD,
+                     sizeof(_prefs.corescope_wifi_password));
+  StrHelper::strncpy(_prefs.corescope_mqtt3_host, CORESCOPE_MQTT3_HOST,
+                     sizeof(_prefs.corescope_mqtt3_host));
+  _prefs.corescope_mqtt3_port = CORESCOPE_MQTT3_PORT;
+  StrHelper::strncpy(_prefs.corescope_mqtt3_audience, CORESCOPE_MQTT3_TOKEN_AUDIENCE,
+                     sizeof(_prefs.corescope_mqtt3_audience));
+  StrHelper::strncpy(_prefs.corescope_mqtt4_host, CORESCOPE_MQTT4_HOST,
+                     sizeof(_prefs.corescope_mqtt4_host));
+  _prefs.corescope_mqtt4_port = CORESCOPE_MQTT4_PORT;
+  StrHelper::strncpy(_prefs.corescope_mqtt4_audience, CORESCOPE_MQTT4_TOKEN_AUDIENCE,
+                     sizeof(_prefs.corescope_mqtt4_audience));
+  StrHelper::strncpy(_prefs.corescope_mqtt_ws_path, CORESCOPE_MQTT_WS_PATH,
+                     sizeof(_prefs.corescope_mqtt_ws_path));
+  StrHelper::strncpy(_prefs.corescope_iata, CORESCOPE_IATA,
+                     sizeof(_prefs.corescope_iata));
+  StrHelper::strncpy(_prefs.corescope_observer_name, CORESCOPE_OBSERVER_NAME,
+                     sizeof(_prefs.corescope_observer_name));
+#endif
   StrHelper::strncpy(_prefs.password, ADMIN_PASSWORD, sizeof(_prefs.password));
   _prefs.freq = LORA_FREQ;
   _prefs.sf = LORA_SF;
@@ -1172,6 +1197,116 @@ void MyMesh::clearStats() {
   ((SimpleMeshTables *)getTables())->resetStats();
 }
 
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+bool MyMesh::handleCoreScopeCommand(char *command, char *reply) {
+  if (strcmp(command, "corescope") == 0 || strcmp(command, "get corescope.help") == 0) {
+    strcpy(reply, "keys: wifi.ssid wifi.password mqtt3.* mqtt4.* ws.path iata observer.name");
+    return true;
+  }
+
+  if (strcmp(command, "get corescope") == 0) {
+    snprintf(reply, 159, "ssid=%s iata=%s m3=%s:%u m4=%s:%u",
+             _prefs.corescope_wifi_ssid, _prefs.corescope_iata,
+             _prefs.corescope_mqtt3_host, _prefs.corescope_mqtt3_port,
+             _prefs.corescope_mqtt4_host, _prefs.corescope_mqtt4_port);
+    return true;
+  }
+
+  static const char get_prefix[] = "get corescope.";
+  if (strncmp(command, get_prefix, sizeof(get_prefix) - 1) == 0) {
+    const char *key = command + sizeof(get_prefix) - 1;
+    const char *value = nullptr;
+    char number[8];
+    if (strcmp(key, "wifi.ssid") == 0) value = _prefs.corescope_wifi_ssid;
+    else if (strcmp(key, "wifi.password") == 0) {
+      value = _prefs.corescope_wifi_password[0] ? "(set)" : "(empty)";
+    } else if (strcmp(key, "mqtt3.host") == 0) value = _prefs.corescope_mqtt3_host;
+    else if (strcmp(key, "mqtt3.port") == 0) {
+      snprintf(number, sizeof(number), "%u", _prefs.corescope_mqtt3_port); value = number;
+    } else if (strcmp(key, "mqtt3.audience") == 0) value = _prefs.corescope_mqtt3_audience;
+    else if (strcmp(key, "mqtt4.host") == 0) value = _prefs.corescope_mqtt4_host;
+    else if (strcmp(key, "mqtt4.port") == 0) {
+      snprintf(number, sizeof(number), "%u", _prefs.corescope_mqtt4_port); value = number;
+    } else if (strcmp(key, "mqtt4.audience") == 0) value = _prefs.corescope_mqtt4_audience;
+    else if (strcmp(key, "ws.path") == 0) value = _prefs.corescope_mqtt_ws_path;
+    else if (strcmp(key, "iata") == 0) value = _prefs.corescope_iata;
+    else if (strcmp(key, "observer.name") == 0) value = _prefs.corescope_observer_name;
+    if (!value) strcpy(reply, "Err - unknown CoreScope key");
+    else snprintf(reply, 159, "> %s", value);
+    return true;
+  }
+
+  static const char set_prefix[] = "set corescope.";
+  if (strncmp(command, set_prefix, sizeof(set_prefix) - 1) != 0) return false;
+
+  char *key = command + sizeof(set_prefix) - 1;
+  char *value = strchr(key, ' ');
+  if (!value) {
+    strcpy(reply, "Err - missing value");
+    return true;
+  }
+  *value++ = 0;
+  while (*value == ' ') ++value;
+
+  bool valid = true;
+  if (strcmp(key, "wifi.ssid") == 0) {
+    valid = value[0] && strlen(value) < sizeof(_prefs.corescope_wifi_ssid);
+    if (valid) StrHelper::strncpy(_prefs.corescope_wifi_ssid, value,
+                                  sizeof(_prefs.corescope_wifi_ssid));
+  } else if (strcmp(key, "wifi.password") == 0) {
+    if (strcmp(value, "-") == 0) value[0] = 0;
+    valid = strlen(value) < sizeof(_prefs.corescope_wifi_password);
+    if (valid) StrHelper::strncpy(_prefs.corescope_wifi_password, value,
+                                  sizeof(_prefs.corescope_wifi_password));
+  } else if (strcmp(key, "mqtt3.host") == 0 || strcmp(key, "mqtt4.host") == 0 ||
+             strcmp(key, "mqtt3.audience") == 0 || strcmp(key, "mqtt4.audience") == 0) {
+    valid = value[0] && !strchr(value, ' ') && strlen(value) < 64;
+    if (valid) {
+      char *dest = strcmp(key, "mqtt3.host") == 0 ? _prefs.corescope_mqtt3_host :
+                   strcmp(key, "mqtt4.host") == 0 ? _prefs.corescope_mqtt4_host :
+                   strcmp(key, "mqtt3.audience") == 0 ? _prefs.corescope_mqtt3_audience :
+                                                        _prefs.corescope_mqtt4_audience;
+      StrHelper::strncpy(dest, value, 64);
+    }
+  } else if (strcmp(key, "mqtt3.port") == 0 || strcmp(key, "mqtt4.port") == 0) {
+    char *end = nullptr;
+    const long port = strtol(value, &end, 10);
+    valid = value[0] && end && *end == 0 && port > 0 && port <= 65535;
+    if (valid) {
+      if (key[4] == '3') _prefs.corescope_mqtt3_port = static_cast<uint16_t>(port);
+      else _prefs.corescope_mqtt4_port = static_cast<uint16_t>(port);
+    }
+  } else if (strcmp(key, "ws.path") == 0) {
+    valid = value[0] == '/' && strlen(value) < sizeof(_prefs.corescope_mqtt_ws_path);
+    if (valid) StrHelper::strncpy(_prefs.corescope_mqtt_ws_path, value,
+                                  sizeof(_prefs.corescope_mqtt_ws_path));
+  } else if (strcmp(key, "iata") == 0) {
+    valid = strlen(value) == 3;
+    for (int i = 0; valid && i < 3; ++i) {
+      valid = isalnum(static_cast<unsigned char>(value[i]));
+      value[i] = toupper(static_cast<unsigned char>(value[i]));
+    }
+    if (valid) StrHelper::strncpy(_prefs.corescope_iata, value,
+                                  sizeof(_prefs.corescope_iata));
+  } else if (strcmp(key, "observer.name") == 0) {
+    valid = value[0] && strlen(value) < sizeof(_prefs.corescope_observer_name);
+    if (valid) StrHelper::strncpy(_prefs.corescope_observer_name, value,
+                                  sizeof(_prefs.corescope_observer_name));
+  } else {
+    strcpy(reply, "Err - unknown CoreScope key");
+    return true;
+  }
+
+  if (!valid) {
+    strcpy(reply, "Err - invalid value");
+  } else {
+    savePrefs();
+    strcpy(reply, "OK - saved; reboot to apply");
+  }
+  return true;
+}
+#endif
+
 void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply) {
   if (region_load_active) {
     if (StrHelper::isBlank(command)) {  // empty/blank line, signal to terminate 'load' operation
@@ -1216,6 +1351,11 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   }
 
   // handle ACL related commands
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  if (handleCoreScopeCommand(command, reply)) {
+    return;
+  } else
+#endif
   if (memcmp(command, "setperm ", 8) == 0) {   // format:  setperm {pubkey-hex} {permissions-int8}
     char* hex = &command[8];
     char* sp = strchr(hex, ' ');   // look for separator char

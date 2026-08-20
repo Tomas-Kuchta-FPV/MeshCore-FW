@@ -28,6 +28,15 @@ static bool isValidName(const char *n) {
 }
 
 void CommonCLI::loadPrefs(FILESYSTEM* fs) {
+  // During migration from the legacy binary preferences, older /prefs.json
+  // files may not contain every key (notably "pass").  Load the legacy data
+  // first as a fallback and then overlay all values present in /prefs.json.
+  // This prevents a firmware default such as ADMIN_PASSWORD="" from silently
+  // replacing an existing administrator password after an OTA update.
+  if (fs->exists("/com_prefs")) {
+    loadPrefsInt(fs, "/com_prefs");
+  }
+
   if (fs->exists("/prefs.json")) {
 #if defined(RP2040_PLATFORM)
     File file = fs->open("/prefs.json", "r");
@@ -39,7 +48,6 @@ void CommonCLI::loadPrefs(FILESYSTEM* fs) {
       file.close();
     }
   } else if (fs->exists("/com_prefs")) {
-    loadPrefsInt(fs, "/com_prefs");
     if (savePrefs(fs)) {  // save to new Serial prefs
   //    fs->remove("/com_prefs");  // remove old
     }

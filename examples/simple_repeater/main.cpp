@@ -106,6 +106,24 @@ void setup() {
 
   the_mesh.begin(fs);
 
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  NodePrefs* prefs = the_mesh.getNodePrefs();
+  CoreScopeObserver::Config observer_config = {
+    prefs->corescope_wifi_ssid,
+    prefs->corescope_wifi_password,
+    prefs->corescope_mqtt3_host,
+    prefs->corescope_mqtt3_port,
+    prefs->corescope_mqtt3_audience,
+    prefs->corescope_mqtt4_host,
+    prefs->corescope_mqtt4_port,
+    prefs->corescope_mqtt4_audience,
+    prefs->corescope_mqtt_ws_path,
+    prefs->corescope_iata,
+    prefs->corescope_observer_name
+  };
+  CoreScopeObserver::begin(the_mesh.self_id, observer_config);
+#endif
+
 #ifdef DISPLAY_CLASS
   ui_task.begin(the_mesh.getNodePrefs(), FIRMWARE_BUILD_DATE, FIRMWARE_VERSION);
 #endif

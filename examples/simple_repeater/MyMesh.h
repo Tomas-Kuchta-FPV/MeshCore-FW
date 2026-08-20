@@ -35,6 +35,9 @@
 #include <helpers/TxtDataHelpers.h>
 #include <helpers/RegionMap.h>
 #include "RateLimiter.h"
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+#include "CoreScopeObserver.h"
+#endif
 
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
@@ -102,6 +105,9 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint32_t pending_discover_tag;
   unsigned long pending_discover_until;
   bool region_load_active;
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  bool handleCoreScopeCommand(char* command, char* reply);
+#endif
   unsigned long dirty_contacts_expiry;
 #if MAX_NEIGHBOURS
   NeighbourInfo neighbours[MAX_NEIGHBOURS];
