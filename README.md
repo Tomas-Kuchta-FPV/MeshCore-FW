@@ -1,3 +1,70 @@
+## MeshCore Repeater Observer
+
+This fork adds a CoreScope packet observer to the MeshCore repeater firmware for the Seeed Studio XIAO ESP32S3 with Wio-SX1262. The repeater remains the primary function; packet observation and forwarding over Wi-Fi/MQTT run as an additional service.
+
+### Installing the firmware
+
+- Use the `OTA.bin` file to update an existing installation through MeshCore OTA. This normally preserves the existing repeater configuration.
+- Use the `merged.bin` file for a complete first installation over USB. A full flash can erase the existing device configuration.
+- After installation, connect to the repeater with the MeshCore mobile app by Liam Cottle and open **Remote Management**.
+
+### Configuring the CoreScope observer
+
+Observer settings are stored in the repeater and can be changed from the MeshCore mobile app without recompiling the firmware. Connect to the repeater, open **Remote Management**, and send the commands below. Administrator authentication is required if an admin password is configured.
+
+Show a summary of the current configuration:
+
+```text
+get corescope
+```
+
+Show the available setting names:
+
+```text
+corescope
+```
+
+Read an individual setting, for example:
+
+```text
+get corescope.wifi.ssid
+get corescope.mqtt3.host
+get corescope.iata
+get corescope.observer.name
+```
+
+Set up the default Czech CoreScope configuration:
+
+```text
+set corescope.wifi.ssid Guest
+set corescope.wifi.password -
+set corescope.mqtt3.host mqtt1.meshcore.cz
+set corescope.mqtt3.port 443
+set corescope.mqtt3.audience mqtt1.meshcore.cz
+set corescope.mqtt4.host mqtt2.meshcore.website
+set corescope.mqtt4.port 443
+set corescope.mqtt4.audience mqtt2.meshcore.website
+set corescope.ws.path /
+set corescope.iata JCL
+set corescope.observer.name XIAO CoreScope
+```
+
+Replace `Guest`, `JCL`, and `XIAO CoreScope` with your own Wi-Fi network, three-character observer location code, and observer name. To configure a protected Wi-Fi network, replace `-` with its password:
+
+```text
+set corescope.wifi.password your-password
+```
+
+The password is never returned in plain text. `get corescope.wifi.password` reports only `(set)` or `(empty)`. The IATA/location code must contain exactly three letters or digits and is stored in uppercase. The WebSocket path must start with `/`.
+
+Each successful change returns:
+
+```text
+OK - saved; reboot to apply
+```
+
+After entering all settings, restart the repeater. The saved observer configuration is then used for the Wi-Fi and MQTT connections. The standard MeshCore commands such as `set name`, position, radio settings, and administrator password continue to configure the repeater independently; `set name` does not change `corescope.observer.name`.
+
 ## About MeshCore
 
 MeshCore is a lightweight, portable C++ library that enables multi-hop packet routing for embedded projects using LoRa and other packet radios. It is designed for developers who want to create resilient, decentralized communication networks that work without the internet.
