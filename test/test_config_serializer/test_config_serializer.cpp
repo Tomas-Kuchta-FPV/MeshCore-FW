@@ -60,6 +60,17 @@ class TestStruct : public ConfigSerializer {
     uint8_t flags;
 };
 
+class DigitKeyStruct : public ConfigSerializer {
+  protected:
+    void structure() override {
+        def("cs_m3_host", host, sizeof(host));
+        def("cs_m4_port", port);
+    }
+  public:
+    char host[64];
+    uint16_t port;
+};
+
 // ── saveSerial: basic ───────────────────────────────────────────────────────
 
 TEST(ConfigSerializer, SaveSerial_Basic) {
@@ -169,6 +180,18 @@ TEST(ConfigSerializer, LoadSerial_IgnoreUnknowns) {
     EXPECT_EQ(1, data.flags);   // flags should be unmodified
     bool match = strcmp("Scott", data.name) == 0;
     EXPECT_TRUE(match);
+}
+
+TEST(ConfigSerializer, LoadSerial_KeyContainingDigits) {
+    MockInputStream s("{cs_m3_host:\"custom.example\",cs_m4_port:8443}");
+    DigitKeyStruct data;
+    data.host[0] = 0;
+    data.port = 0;
+
+    bool success = data.loadSerial(s);
+    EXPECT_TRUE(success);
+    EXPECT_STREQ("custom.example", data.host);
+    EXPECT_EQ(8443, data.port);
 }
 
 

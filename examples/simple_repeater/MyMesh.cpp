@@ -41,6 +41,71 @@
   #define TXT_ACK_DELAY 200
 #endif
 
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+static bool isValidCoreScopeIata(const char *value) {
+  if (strlen(value) != 3) return false;
+  for (int i = 0; i < 3; ++i) {
+    if (!isalnum(static_cast<unsigned char>(value[i]))) return false;
+  }
+  return true;
+}
+
+static bool migrateCoreScopePrefs(NodePrefs &prefs) {
+  bool changed = false;
+
+  if (!prefs.corescope_wifi_ssid[0]) {
+    StrHelper::strncpy(prefs.corescope_wifi_ssid, CORESCOPE_WIFI_SSID,
+                       sizeof(prefs.corescope_wifi_ssid));
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt3_host[0]) {
+    StrHelper::strncpy(prefs.corescope_mqtt3_host, CORESCOPE_MQTT3_HOST,
+                       sizeof(prefs.corescope_mqtt3_host));
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt3_port) {
+    prefs.corescope_mqtt3_port = CORESCOPE_MQTT3_PORT;
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt3_audience[0]) {
+    StrHelper::strncpy(prefs.corescope_mqtt3_audience, CORESCOPE_MQTT3_TOKEN_AUDIENCE,
+                       sizeof(prefs.corescope_mqtt3_audience));
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt4_host[0]) {
+    StrHelper::strncpy(prefs.corescope_mqtt4_host, CORESCOPE_MQTT4_HOST,
+                       sizeof(prefs.corescope_mqtt4_host));
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt4_port) {
+    prefs.corescope_mqtt4_port = CORESCOPE_MQTT4_PORT;
+    changed = true;
+  }
+  if (!prefs.corescope_mqtt4_audience[0]) {
+    StrHelper::strncpy(prefs.corescope_mqtt4_audience, CORESCOPE_MQTT4_TOKEN_AUDIENCE,
+                       sizeof(prefs.corescope_mqtt4_audience));
+    changed = true;
+  }
+  if (prefs.corescope_mqtt_ws_path[0] != '/') {
+    StrHelper::strncpy(prefs.corescope_mqtt_ws_path, CORESCOPE_MQTT_WS_PATH,
+                       sizeof(prefs.corescope_mqtt_ws_path));
+    changed = true;
+  }
+  if (!isValidCoreScopeIata(prefs.corescope_iata)) {
+    StrHelper::strncpy(prefs.corescope_iata, CORESCOPE_IATA,
+                       sizeof(prefs.corescope_iata));
+    changed = true;
+  }
+  if (!prefs.corescope_observer_name[0]) {
+    StrHelper::strncpy(prefs.corescope_observer_name, CORESCOPE_OBSERVER_NAME,
+                       sizeof(prefs.corescope_observer_name));
+    changed = true;
+  }
+
+  return changed;
+}
+#endif
+
 #define FIRMWARE_VER_LEVEL       2
 
 #define REQ_TYPE_GET_STATUS         0x01 // same as _GET_STATS
@@ -950,6 +1015,14 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _fs = fs;
   // load persisted prefs
   _cli.loadPrefs(_fs);
+#if defined(WITH_CORESCOPE_OBSERVER) && defined(ESP32)
+  // Preferences written by the original repeater firmware do not contain the
+  // CoreScope keys.  Keep all existing repeater settings, fill only missing or
+  // invalid observer values, and persist the extended schema once.
+  if (migrateCoreScopePrefs(_prefs)) {
+    _cli.savePrefs(_fs);
+  }
+#endif
   acl.load(_fs, self_id);
   // TODO: key_store.begin();
   region_map.load(_fs);
