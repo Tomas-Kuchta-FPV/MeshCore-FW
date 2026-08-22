@@ -12,6 +12,7 @@
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
+#include <esp_wifi.h>
 
 #ifndef CORESCOPE_WIFI_SSID
 #define CORESCOPE_WIFI_SSID "Guest"
@@ -150,6 +151,7 @@ BrokerState broker4{"MQTT2 Czech", CORESCOPE_MQTT4_HOST, CORESCOPE_MQTT4_PORT,
                     CORESCOPE_MQTT4_TOKEN_AUDIENCE};
 BrokerState *brokers[] = {&broker3, &broker4};
 SemaphoreHandle_t signing_mutex = nullptr;
+TaskHandle_t wifi_task_handle = nullptr;
 char observer_id[2 * PUB_KEY_SIZE + 1] = {};
 char packet_topic[64 + 2 * PUB_KEY_SIZE] = {};
 char status_topic[64 + 2 * PUB_KEY_SIZE] = {};
@@ -160,6 +162,101 @@ const char *wifi_password = CORESCOPE_WIFI_PASSWORD;
 const char *mqtt_ws_path = CORESCOPE_MQTT_WS_PATH;
 const char *observer_name = CORESCOPE_OBSERVER_NAME;
 constexpr uint32_t kReconnectDelaysMs[] = {3000, 6000, 12000, 30000, 60000};
+constexpr uint32_t kWifiConnectTimeoutMs = 20000;
+constexpr uint32_t kWifiDhcpTimeoutMs = 20000;
+
+enum class WifiPhase : uint8_t {
+  CONNECTING,
+  WAITING_FOR_IP,
+  ONLINE,
+  RETRY_WAIT
+};
+
+WifiPhase wifi_phase = WifiPhase::CONNECTING;
+volatile bool wifi_online = false;
+uint8_t wifi_retry_step = 0;
+uint32_t wifi_deadline_ms = 0;
+
+bool hasUsableIpAddress() {
+  const IPAddress ip = WiFi.localIP();
+  return ip[0] != 0 || ip[1] != 0 || ip[2] != 0 || ip[3] != 0;
+}
+
+void startWifiAttempt() {
+  wifi_online = false;
+  wifi_phase = WifiPhase::CONNECTING;
+  wifi_deadline_ms = millis() + kWifiConnectTimeoutMs;
+  Serial.printf("[CoreScope WiFi] connecting to %s\n", wifi_ssid);
+  WiFi.begin(wifi_ssid, wifi_password);
+}
+
+void scheduleWifiRetry(const char *reason) {
+  wifi_online = false;
+  WiFi.disconnect(false, false);
+  const uint32_t delay_ms = kReconnectDelaysMs[wifi_retry_step];
+  if (wifi_retry_step + 1 <
+      sizeof(kReconnectDelaysMs) / sizeof(kReconnectDelaysMs[0])) {
+    ++wifi_retry_step;
+  }
+  wifi_phase = WifiPhase::RETRY_WAIT;
+  wifi_deadline_ms = millis() + delay_ms;
+  Serial.printf("[CoreScope WiFi] %s; retry in %lu s\n", reason,
+                static_cast<unsigned long>(delay_ms / 1000));
+}
+
+void updateWifiState() {
+  const uint32_t now = millis();
+  wifi_ap_record_t ap_info;
+  const bool associated = esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK;
+  const bool has_ip = associated && hasUsableIpAddress();
+
+  if (has_ip) {
+    if (wifi_phase != WifiPhase::ONLINE) {
+      const IPAddress ip = WiFi.localIP();
+      wifi_phase = WifiPhase::ONLINE;
+      wifi_online = true;
+      wifi_retry_step = 0;
+      Serial.printf("[CoreScope WiFi] online ssid=%s ip=%s rssi=%d dBm\n",
+                    wifi_ssid, ip.toString().c_str(), WiFi.RSSI());
+    }
+    return;
+  }
+
+  wifi_online = false;
+  if (wifi_phase == WifiPhase::ONLINE) {
+    scheduleWifiRetry("connection lost");
+    return;
+  }
+
+  if (associated && wifi_phase != WifiPhase::WAITING_FOR_IP) {
+    wifi_phase = WifiPhase::WAITING_FOR_IP;
+    wifi_deadline_ms = now + kWifiDhcpTimeoutMs;
+    Serial.println("[CoreScope WiFi] associated; waiting for DHCP address");
+    return;
+  }
+
+  if (!associated && wifi_phase == WifiPhase::WAITING_FOR_IP) {
+    scheduleWifiRetry("connection lost before DHCP completed");
+    return;
+  }
+
+  if (static_cast<int32_t>(now - wifi_deadline_ms) < 0) return;
+
+  if (wifi_phase == WifiPhase::RETRY_WAIT) {
+    startWifiAttempt();
+  } else if (wifi_phase == WifiPhase::WAITING_FOR_IP) {
+    scheduleWifiRetry("DHCP timeout");
+  } else {
+    scheduleWifiRetry("connection timeout");
+  }
+}
+
+void wifiTask(void *) {
+  for (;;) {
+    updateWifiState();
+    vTaskDelay(pdMS_TO_TICKS(250));
+  }
+}
 
 size_t base64UrlEncode(const uint8_t *src, size_t len, char *dst, size_t capacity) {
   static constexpr char alphabet[] =
@@ -360,7 +457,7 @@ void updateReconnectState(BrokerState &broker) {
 }
 
 void ensureMqtt(BrokerState &broker) {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (!wifi_online) return;
   // TLS and JWT both require a valid wall clock. This wait happens only in the
   // observer task and never stalls MeshCore radio processing.
   if (time(nullptr) < 1700000000) return;
@@ -429,15 +526,24 @@ void observerTask(void *arg) {
   BrokerState &broker = *static_cast<BrokerState *>(arg);
   RxItem item;
   for (;;) {
+    // Extremely low-memory fallback if the dedicated Wi-Fi task could not be
+    // created. Only one broker task owns the state machine in that case.
+    if (!wifi_task_handle && &broker == &broker3) updateWifiState();
     ensureMqtt(broker);
-    if (broker.websocket_started) broker.mqtt.update();
+    if (wifi_online && broker.websocket_started) broker.mqtt.update();
 
-    if (broker.mqtt.isConnected() && millis() - broker.last_status_ms >= 300000UL) {
+    if (wifi_online && broker.mqtt.isConnected() &&
+        millis() - broker.last_status_ms >= 300000UL) {
       publishStatus(broker);
     }
 
     if (xQueueReceive(broker.queue, &item, pdMS_TO_TICKS(100)) == pdTRUE) {
-      if (broker.mqtt.isConnected()) publish(broker, item);
+      if (wifi_online && broker.mqtt.isConnected()) {
+        publish(broker, item);
+      } else {
+        ++broker.dropped;
+        ++dropped;
+      }
       // No retry and no blocking storage: mesh routing always has priority.
     }
     vTaskDelay(pdMS_TO_TICKS(1));
@@ -467,11 +573,18 @@ void begin(const mesh::LocalIdentity &identity, const Config &config) {
   signing_mutex = xSemaphoreCreateMutex();
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.setAutoReconnect(true);
-  WiFi.begin(wifi_ssid, wifi_password);
+  // Reconnects are managed here so that association and DHCP each have a
+  // bounded timeout and cannot remain stuck indefinitely.
+  WiFi.setAutoReconnect(false);
+  startWifiAttempt();
   configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
   broker3.queue = xQueueCreate(CORESCOPE_QUEUE_LENGTH, sizeof(RxItem));
   broker4.queue = xQueueCreate(CORESCOPE_QUEUE_LENGTH, sizeof(RxItem));
+  if (xTaskCreatePinnedToCore(wifiTask, "corescope-wifi", 4096, nullptr, 1,
+                              &wifi_task_handle, 0) != pdPASS) {
+    wifi_task_handle = nullptr;
+    Serial.println("[CoreScope WiFi] task allocation failed; using MQTT task fallback");
+  }
   if (broker3.queue) {
     xTaskCreatePinnedToCore(observerTask, "corescope-mqtt1",
                             CORESCOPE_TASK_STACK_SIZE, &broker3, 1, nullptr, 0);
