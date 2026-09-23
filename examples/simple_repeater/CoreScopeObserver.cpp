@@ -530,6 +530,9 @@ void observerTask(void *arg) {
     // created. Only one broker task owns the state machine in that case.
     if (!wifi_task_handle && &broker == &broker3) updateWifiState();
     ensureMqtt(broker);
+    // TLS/WebSocket setup can take long enough to trip the ESP32 idle watchdog
+    // when both broker workers are pinned to the same core.
+    vTaskDelay(pdMS_TO_TICKS(10));
     if (wifi_online && broker.websocket_started) broker.mqtt.update();
 
     if (wifi_online && broker.mqtt.isConnected() &&
@@ -591,7 +594,7 @@ void begin(const mesh::LocalIdentity &identity, const Config &config) {
   }
   if (broker4.queue) {
     xTaskCreatePinnedToCore(observerTask, "corescope-mqtt2",
-                            CORESCOPE_TASK_STACK_SIZE, &broker4, 1, nullptr, 0);
+                            CORESCOPE_TASK_STACK_SIZE, &broker4, 1, nullptr, 1);
   }
 }
 
