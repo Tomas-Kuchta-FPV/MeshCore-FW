@@ -119,7 +119,12 @@ void setup() {
     prefs->corescope_mqtt4_audience,
     prefs->corescope_mqtt_ws_path,
     prefs->corescope_iata,
-    prefs->corescope_observer_name
+    prefs->corescope_observer_name,
+    CORESCOPE_MODEL,
+    prefs->freq,
+    prefs->bw,
+    prefs->sf,
+    prefs->cr
   };
   CoreScopeObserver::begin(the_mesh.self_id, observer_config);
 #endif

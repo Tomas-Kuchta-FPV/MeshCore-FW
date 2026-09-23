@@ -47,6 +47,9 @@
 #ifndef CORESCOPE_OBSERVER_NAME
 #define CORESCOPE_OBSERVER_NAME "XIAO MeshCore Repeater"
 #endif
+#ifndef CORESCOPE_MODEL
+#define CORESCOPE_MODEL "MeshCore ESP32 repeater"
+#endif
 #ifndef CORESCOPE_QUEUE_LENGTH
 #define CORESCOPE_QUEUE_LENGTH 12
 #endif
@@ -161,6 +164,8 @@ const char *wifi_ssid = CORESCOPE_WIFI_SSID;
 const char *wifi_password = CORESCOPE_WIFI_PASSWORD;
 const char *mqtt_ws_path = CORESCOPE_MQTT_WS_PATH;
 const char *observer_name = CORESCOPE_OBSERVER_NAME;
+const char *observer_model = CORESCOPE_MODEL;
+char radio_description[96] = "";
 constexpr uint32_t kReconnectDelaysMs[] = {3000, 6000, 12000, 30000, 60000};
 constexpr uint32_t kWifiConnectTimeoutMs = 20000;
 constexpr uint32_t kWifiDhcpTimeoutMs = 20000;
@@ -390,10 +395,11 @@ void buildStatus(char *json, size_t capacity, const char *status) {
   utcFields(timestamp, clock_time, date);
   snprintf(json, capacity,
       "{\"status\":\"%s\",\"timestamp\":\"%s\",\"origin\":\"%s\","
-      "\"origin_id\":\"%s\",\"model\":\"XIAO ESP32S3 Wio-SX1262\","
-      "\"firmware_version\":\"%s\",\"client_version\":\"meshcore-xiao-corescope/1\","
-      "\"radio\":\"SX1262\",\"repeat\":true,\"stats\":{\"uptime_secs\":%lu}}",
-      status, timestamp, observer_name, observer_id, FIRMWARE_VERSION,
+      "\"origin_id\":\"%s\",\"model\":\"%s\","
+      "\"firmware_version\":\"%s\",\"client_version\":\"repeater-observer-v1.17\","
+      "\"radio\":\"%s\",\"repeat\":true,\"stats\":{\"uptime_secs\":%lu}}",
+      status, timestamp, observer_name, observer_id, observer_model,
+      FIRMWARE_VERSION, radio_description,
       static_cast<unsigned long>(millis() / 1000UL));
 }
 
@@ -564,6 +570,11 @@ void begin(const mesh::LocalIdentity &identity, const Config &config) {
   wifi_password = config.wifi_password;
   mqtt_ws_path = config.mqtt_ws_path;
   observer_name = config.observer_name;
+  observer_model = config.model;
+  snprintf(radio_description, sizeof(radio_description),
+           "SX1262 %.3f MHz SF%u BW%.1f CR4/%u",
+           config.frequency, static_cast<unsigned>(config.spreading_factor),
+           config.bandwidth, static_cast<unsigned>(config.coding_rate));
   broker3.host = config.mqtt3_host;
   broker3.port = config.mqtt3_port;
   broker3.audience = config.mqtt3_audience;

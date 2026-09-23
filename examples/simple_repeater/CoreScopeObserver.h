@@ -38,6 +38,9 @@
 #ifndef CORESCOPE_OBSERVER_NAME
 #define CORESCOPE_OBSERVER_NAME "XIAO MeshCore Repeater"
 #endif
+#ifndef CORESCOPE_MODEL
+#define CORESCOPE_MODEL "MeshCore ESP32 repeater"
+#endif
 
 namespace CoreScopeObserver {
 
@@ -53,6 +56,11 @@ struct Config {
   const char *mqtt_ws_path;
   const char *iata;
   const char *observer_name;
+  const char *model;
+  float frequency;
+  float bandwidth;
+  uint8_t spreading_factor;
+  uint8_t coding_rate;
 };
 
 void begin(const mesh::LocalIdentity &identity, const Config &config);
